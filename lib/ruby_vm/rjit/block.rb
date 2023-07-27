@@ -3,6 +3,7 @@ class RubyVM::RJIT::Block < Struct.new(
   :pc,          # @param [Integer] Starting PC
   :ctx,         # @param [RubyVM::RJIT::Context] **Starting** Context (TODO: freeze?)
   :start_addr,  # @param [Integer] Starting address of this block's JIT code
+  :end_addr,    # @param [Integer] Ending address of this block's JIT code
   :entry_exit,  # @param [Integer] Address of entry exit (optional)
   :incoming,    # @param [Array<RubyVM::RJIT::BranchStub>] Incoming branches
   :invalidated, # @param [TrueClass,FalseClass] true if already invalidated

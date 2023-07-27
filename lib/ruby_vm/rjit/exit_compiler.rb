@@ -14,6 +14,7 @@ module RubyVM::RJIT
 
       # Restore callee-saved registers
       asm.comment("#{cause}: entry exit")
+      asm.leave
       asm.pop(SP)
       asm.pop(EC)
       asm.pop(CFP)
@@ -28,6 +29,7 @@ module RubyVM::RJIT
       asm.comment('default cfp->jit_return')
 
       # Restore callee-saved registers
+      asm.leave
       asm.pop(SP)
       asm.pop(EC)
       asm.pop(CFP)
@@ -50,6 +52,7 @@ module RubyVM::RJIT
       # TODO: count the exit
 
       # Restore callee-saved registers
+      asm.leave
       asm.pop(SP)
       asm.pop(EC)
       asm.pop(CFP)
@@ -70,6 +73,7 @@ module RubyVM::RJIT
 
       # Restore callee-saved registers
       asm.comment("exit to interpreter on #{pc_to_insn(pc).name}")
+      asm.leave
       asm.pop(SP)
       asm.pop(EC)
       asm.pop(CFP)

@@ -47,10 +47,12 @@ module RubyVM::RJIT
       @labels = {}
       @label_id = 0
       @comments = Hash.new { |h, k| h[k] = [] }
-      @blocks = Hash.new { |h, k| h[k] = [] }
+      @blocks_start = Hash.new { |h, k| h[k] = [] }
+      @blocks_end = Hash.new { |h, k| h[k] = [] }
       @stub_starts = Hash.new { |h, k| h[k] = [] }
       @stub_ends = Hash.new { |h, k| h[k] = [] }
       @pos_markers = Hash.new { |h, k| h[k] = [] }
+      @perfmap_file = File.open("/tmp/perf-#{Process.pid}.map", "a") if C.rjit_opts.perfmap
     end
 
     def assemble(addr)
@@ -520,6 +522,12 @@ module RubyVM::RJIT
       end
     end
 
+    def leave
+      insn(
+        opcode: 0xc9,
+      )
+    end
+
     def mov(dst, src)
       case dst
       in R32 => dst_reg
@@ -882,7 +890,10 @@ module RubyVM::RJIT
 
     # Mark the starting address of a block
     def block(block)
-      @blocks[@bytes.size] << block
+      @blocks_start[@bytes.size] << block
+      yield
+    ensure
+      @blocks_end[@bytes.size] << block
     end
 
     # Mark the starting/ending addresses of a stub
@@ -915,6 +926,17 @@ module RubyVM::RJIT
     end
 
     private
+
+    def add_perfmap_entry(block)
+      if @perfmap_file
+        if block.start_addr && block.end_addr && block.start_addr < block.end_addr
+          start_addr_hex = "%x" % block.start_addr
+          end_addr_hex = "%x" % block.end_addr
+          location = "#{block.iseq.body.location.label}@#{C.rb_iseq_path(block.iseq)}"
+          @perfmap_file.puts "#{start_addr_hex} #{end_addr_hex} #{location}"
+        end
+      end
+    end
 
     def insn(prefix: 0, opcode:, rd: nil, mod_rm: nil, disp: nil, imm: nil)
       # Determine prefix
@@ -1021,8 +1043,12 @@ module RubyVM::RJIT
 
     def set_code_addrs(write_addr)
       (@bytes.size + 1).times do |index|
-        @blocks.fetch(index, []).each do |block|
+        @blocks_start.fetch(index, []).each do |block|
           block.start_addr = write_addr + index
+        end
+        @blocks_end.fetch(index, []).each do |block|
+          block.end_addr = write_addr + index
+          add_perfmap_entry(block)
         end
         @stub_starts.fetch(index, []).each do |stub|
           stub.start_addr = write_addr + index

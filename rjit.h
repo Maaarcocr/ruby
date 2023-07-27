@@ -40,6 +40,7 @@ struct rb_rjit_options {
     bool verify_ctx;
     // [experimental] Do not start RJIT until RJIT.resume is called.
     bool pause;
+    bool perfmap;
 };
 
 RUBY_SYMBOL_EXPORT_BEGIN

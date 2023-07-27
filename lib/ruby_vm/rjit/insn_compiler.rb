@@ -1875,6 +1875,7 @@ module RubyVM::RJIT
       asm.call(C.rb_vm_throw)
 
       asm.comment('exit from throw')
+      asm.leave
       asm.pop(SP)
       asm.pop(EC)
       asm.pop(CFP)

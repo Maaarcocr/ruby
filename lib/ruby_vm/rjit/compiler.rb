@@ -239,6 +239,9 @@ module RubyVM::RJIT
       asm.push(CFP)
       asm.push(EC)
       asm.push(SP)
+      asm.push(:rbp)
+      asm.mov(:rbp, :rsp)
+      asm.sub(:rsp, 8) # align stack
 
       # Move arguments EC and CFP to dedicated registers
       asm.mov(EC, :rdi)
@@ -286,59 +289,61 @@ module RubyVM::RJIT
       ctx = limit_block_versions(jit.iseq, pc, ctx)
       block = Block.new(iseq: jit.iseq, pc:, ctx: ctx.dup)
       jit.block = block
-      asm.block(block)
-
       iseq = jit.iseq
-      asm.comment("Block: #{iseq.body.location.label}@#{C.rb_iseq_path(iseq)}:#{iseq_lineno(iseq, pc)}")
 
-      # Compile each insn
-      index = (pc - iseq.body.iseq_encoded.to_i) / C.VALUE.size
-      while index < iseq.body.iseq_size
-        # Set the current instruction
-        insn = self.class.decode_insn(iseq.body.iseq_encoded[index])
-        jit.pc = (iseq.body.iseq_encoded + index).to_i
-        jit.stack_size_for_pc = ctx.stack_size
-        jit.side_exit_for_pc.clear
+      asm.block(block) do
+        location = "#{iseq.body.location.label}@#{C.rb_iseq_path(iseq)}:#{iseq_lineno(iseq, pc)}"
+        asm.comment("Block: #{location}")
 
-        # If previous instruction requested to record the boundary
-        if jit.record_boundary_patch_point
-          # Generate an exit to this instruction and record it
-          exit_pos = Assembler.new.then do |ocb_asm|
-            @exit_compiler.compile_side_exit(jit.pc, ctx, ocb_asm)
-            @ocb.write(ocb_asm)
-          end
-          Invariants.record_global_inval_patch(asm, exit_pos)
-          jit.record_boundary_patch_point = false
-        end
+        # Compile each insn
+        index = (pc - iseq.body.iseq_encoded.to_i) / C.VALUE.size
+        while index < iseq.body.iseq_size
+          # Set the current instruction
+          insn = self.class.decode_insn(iseq.body.iseq_encoded[index])
+          jit.pc = (iseq.body.iseq_encoded + index).to_i
+          jit.stack_size_for_pc = ctx.stack_size
+          jit.side_exit_for_pc.clear
 
-        # In debug mode, verify our existing assumption
-        if C.rjit_opts.verify_ctx && jit.at_current_insn?
-          verify_ctx(jit, ctx)
-        end
-
-        case status = @insn_compiler.compile(jit, ctx, asm, insn)
-        when KeepCompiling
-          # For now, reset the chain depth after each instruction as only the
-          # first instruction in the block can concern itself with the depth.
-          ctx.chain_depth = 0
-
-          index += insn.len
-        when EndBlock
-          # TODO: pad nops if entry exit exists (not needed for x86_64?)
-          break
-        when CantCompile
-          # Rewind stack_size using ctx.with_stack_size to allow stack_size changes
-          # before you return CantCompile.
-          @exit_compiler.compile_side_exit(jit.pc, ctx.with_stack_size(jit.stack_size_for_pc), asm)
-
-          # If this is the first instruction, this block never needs to be invalidated.
-          if block.pc == iseq.body.iseq_encoded.to_i + index * C.VALUE.size
-            block.invalidated = true
+          # If previous instruction requested to record the boundary
+          if jit.record_boundary_patch_point
+            # Generate an exit to this instruction and record it
+            exit_pos = Assembler.new.then do |ocb_asm|
+              @exit_compiler.compile_side_exit(jit.pc, ctx, ocb_asm)
+              @ocb.write(ocb_asm)
+            end
+            Invariants.record_global_inval_patch(asm, exit_pos)
+            jit.record_boundary_patch_point = false
           end
 
-          break
-        else
-          raise "compiling #{insn.name} returned unexpected status: #{status.inspect}"
+          # In debug mode, verify our existing assumption
+          if C.rjit_opts.verify_ctx && jit.at_current_insn?
+            verify_ctx(jit, ctx)
+          end
+
+          case status = @insn_compiler.compile(jit, ctx, asm, insn)
+          when KeepCompiling
+            # For now, reset the chain depth after each instruction as only the
+            # first instruction in the block can concern itself with the depth.
+            ctx.chain_depth = 0
+
+            index += insn.len
+          when EndBlock
+            # TODO: pad nops if entry exit exists (not needed for x86_64?)
+            break
+          when CantCompile
+            # Rewind stack_size using ctx.with_stack_size to allow stack_size changes
+            # before you return CantCompile.
+            @exit_compiler.compile_side_exit(jit.pc, ctx.with_stack_size(jit.stack_size_for_pc), asm)
+
+            # If this is the first instruction, this block never needs to be invalidated.
+            if block.pc == iseq.body.iseq_encoded.to_i + index * C.VALUE.size
+              block.invalidated = true
+            end
+
+            break
+          else
+            raise "compiling #{insn.name} returned unexpected status: #{status.inspect}"
+          end
         end
       end
 
